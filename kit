@@ -1,0 +1,406 @@
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/autoload.php';
+
+use App\Core\Config;
+use App\Core\Template;
+
+Config::load('site');
+Config::load('meta');
+
+$args = $argv;
+array_shift($args);
+
+$command = $args[0] ?? null;
+$argument = $args[1] ?? null;
+
+function titleCase($str)
+{
+    return ucfirst(strtolower($str));
+}
+
+if (!$command || in_array($command, ['help', '--help', '-h'])) {
+    echo "TemplateKit CLI\n\n";
+    echo "Usage:\n";
+    echo "  php kit make:view about         Create view only\n";
+    echo "  php kit make:route contact      Register route only\n";
+    echo "  php kit make:page services      Create view + route + meta\n";
+    echo "  php kit make:helper Logger      Create a helper in app/Core/Helpers\n";
+    echo "  php kit make:controller Page    Create a controller in app/Controllers\n";
+    echo "  php kit serve                   Start development server\n";
+    echo "  php kit list                    List all available views & routes\n";
+    echo "  php kit install:ui <library>    Install a UI library\n";
+    echo "  php kit make:component header/nav  Create reusable Blade-style component\n";
+    exit;
+}
+
+// make:view
+if ($command === 'make:view' && $argument) {
+    $viewFile = __DIR__ . "/resources/views/pages/{$argument}.blade.php";
+    if (!file_exists($viewFile)) {
+        file_put_contents($viewFile, "<h1>" . titleCase($argument) . " Page</h1>\n<p>Welcome to the {$argument} page.</p>");
+        echo "View created: resources/views/pages/{$argument}.blade.php\n";
+    } else {
+        echo "View already exists: {$argument}\n";
+    }
+    exit;
+}
+
+// make:route
+if ($command === 'make:route' && $argument) {
+    $routeFile = __DIR__ . '/routes/web.php';
+    $routeCode = "Route::get('/{$argument}', function() {\n    Template::render('{$argument}');\n});";
+    if (strpos(file_get_contents($routeFile), $routeCode) === false) {
+        file_put_contents($routeFile, "\n{$routeCode}\n", FILE_APPEND);
+        echo "Route added for '/{$argument}' in routes/web.php\n";
+    } else {
+        echo "Route already exists for '/{$argument}'\n";
+    }
+    exit;
+}
+
+// make:page
+if ($command === 'make:page' && $argument) {
+    $viewFile = __DIR__ . "/resources/views/pages/{$argument}.blade.php";
+    if (!file_exists($viewFile)) {
+        file_put_contents($viewFile, "<h1>" . titleCase($argument) . " Page</h1>\n<p>Welcome to the {$argument} page.</p>");
+        echo "View created: resources/views/pages/{$argument}.blade.php\n";
+    } else {
+        echo "View already exists: {$argument}\n";
+    }
+
+    $routeFile = __DIR__ . '/routes/web.php';
+    $routeCode = "Route::get('/{$argument}', function() {\n    Template::render('{$argument}');\n});";
+    if (strpos(file_get_contents($routeFile), $routeCode) === false) {
+        file_put_contents($routeFile, "\n{$routeCode}\n", FILE_APPEND);
+        echo "Route registered: /{$argument}\n";
+    } else {
+        echo "Route already exists: /{$argument}\n";
+    }
+
+    $metaPath = __DIR__ . "/config/meta.php";
+    $meta = file_exists($metaPath) ? include $metaPath : [];
+    if (!isset($meta[$argument])) {
+        $meta[$argument] = [
+            'title' => titleCase($argument) . ' | ' . Config::get('site', 'name'),
+            'description' => "This is the {$argument} page of TemplateKit."
+        ];
+        file_put_contents($metaPath, "<?php\n\nreturn " . var_export($meta, true) . ";\n");
+        echo "Meta added to config/meta.php\n";
+    } else {
+        echo "Meta already exists for '{$argument}'\n";
+    }
+
+    exit;
+}
+
+// make:helper
+if ($command === 'make:helper' && $argument) {
+    $fileName = ucfirst($argument) . '.php';
+    $helperDir = __DIR__ . '/app/Core/Helpers';
+    $filePath = $helperDir . '/' . $fileName;
+
+    if (file_exists($filePath)) {
+        echo "Helper already exists: {$fileName}\n";
+        exit;
+    }
+
+    if (!is_dir($helperDir)) {
+        mkdir($helperDir, 0755, true);
+    }
+
+    $template = <<<PHP
+<?php
+
+/**
+ * {$argument} Helper
+ * Define your helper functions here.
+ */
+
+function {$argument}Example() {
+    return 'This is a {$argument} helper.';
+}
+PHP;
+
+    file_put_contents($filePath, $template);
+    echo "Helper created: app/Core/Helpers/{$fileName}\n";
+    exit;
+}
+
+if ($command === 'make:controller' && $argument) {
+    // Normalize directory and class name
+    $parts = explode('/', str_replace('\\', '/', $argument));
+    $baseName = array_pop($parts); // Get last part
+    $subDir = implode('/', $parts); // Remaining path, e.g., Auth
+
+    // Only add 'Controller' if not already present
+    $className = str_ends_with($baseName, 'Controller') ? $baseName : $baseName . 'Controller';
+
+    $controllerDir = __DIR__ . '/app/Controllers' . ($subDir ? '/' . $subDir : '');
+    $filePath = $controllerDir . '/' . $className . '.php';
+
+    if (file_exists($filePath)) {
+        echo "Controller already exists: {$className}.php\n";
+        exit;
+    }
+
+    if (!is_dir($controllerDir)) {
+        mkdir($controllerDir, 0755, true);
+    }
+
+    // Build correct namespace
+    $namespace = 'App\\Controllers' . ($subDir ? '\\' . str_replace('/', '\\', $subDir) : '');
+
+    $controllerTemplate = <<<PHP
+<?php
+
+namespace {$namespace};
+
+use App\Core\Controller;
+
+class {$className} extends Controller
+{
+    public function index()
+    {
+        
+    }
+}
+PHP;
+
+    file_put_contents($filePath, $controllerTemplate);
+    echo "Controller created: app/Controllers/" . ($subDir ? $subDir . '/' : '') . "{$className}.php\n";
+    exit;
+}
+
+
+// serve
+if ($command === 'serve') {
+    $host = 'localhost';
+    $port = '8000';
+    $publicDir = __DIR__ . '/public';
+
+    if (!is_dir($publicDir)) {
+        echo "Error: 'public' directory not found.\n";
+        exit(1);
+    }
+
+    echo "Starting development server at http://{$host}:{$port}\n";
+    passthru("php -S {$host}:{$port} -t {$publicDir}");
+    exit;
+}
+
+// makin component
+if (strpos($command, 'make:component') === 0) {
+    $input = $args[1] ?? null;
+
+    if (!$input) {
+        echo "Component name required.\n";
+        echo "Usage: php kit make:component header/nav\n";
+        exit;
+    }
+
+    $parts = explode('/', $input);
+    $filename = array_pop($parts);
+    $dir = __DIR__ . '/resources/views/components/' . implode('/', $parts);
+
+    if (!is_dir($dir)) {
+        mkdir($dir, 0777, true);
+    }
+
+    $filepath = "$dir/{$filename}.blade.php";
+
+    if (file_exists($filepath)) {
+        echo "⚠️ Component already exists: $filepath\n";
+    } else {
+        file_put_contents($filepath, "<!-- Component: $input -->\n<div>\n    <!-- Your HTML here -->\n</div>\n");
+        echo "Component created: $filepath\n";
+    }
+
+    exit;
+}
+
+
+if ($command === 'install:ui' && $argument) {
+    $assetDir = __DIR__ . '/resources/assets';
+    $cssDir   = $assetDir . '/css';
+    $jsDir    = $assetDir . '/js';
+    $jsonPath = $assetDir . '/assets.json';
+
+    [$name, $version] = explode('@', $argument) + [$argument, 'latest'];
+    $name = strtolower($name);
+
+    $cdnMap = [
+        'bootstrap' => [
+            'css' => "https://cdn.jsdelivr.net/npm/bootstrap@{version}/dist/css/bootstrap.min.css",
+            'js'  => "https://cdn.jsdelivr.net/npm/bootstrap@{version}/dist/js/bootstrap.bundle.min.js",
+        ],
+        'tailwind' => [
+            'css' => "https://cdn.jsdelivr.net/npm/tailwindcss@{version}/dist/tailwind.min.css",
+        ],
+        'jquery' => [
+            'js' => "https://cdn.jsdelivr.net/npm/jquery@{version}/dist/jquery.min.js"
+        ],
+        'alpine' => [
+            'js' => "https://cdn.jsdelivr.net/npm/alpinejs@{version}/dist/cdn.min.js"
+        ],
+        'fontawesome' => [
+            'css' => "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@{version}/css/all.min.css"
+        ],
+        'animate' => [
+            'css' => "https://cdn.jsdelivr.net/npm/animate.css@{version}/animate.min.css"
+        ],
+    ];
+
+    if (!isset($cdnMap[$name])) {
+        echo "Unknown UI library: $name\n";
+        exit(1);
+    }
+
+    if (!file_exists($jsonPath)) {
+        file_put_contents($jsonPath, json_encode(['css' => [], 'js' => []], JSON_PRETTY_PRINT));
+    }
+
+    $json = json_decode(file_get_contents($jsonPath), true);
+
+    foreach (['css', 'js'] as $type) {
+        if (!isset($cdnMap[$name][$type])) {
+            continue;
+        }
+
+        $urlTemplate = $cdnMap[$name][$type];
+        $url = str_replace('{version}', $version, $urlTemplate);
+
+        $fileName = "$name.min." . ($type === 'css' ? 'css' : 'js');
+        $filePath = ($type === 'css' ? $cssDir : $jsDir) . "/$fileName";
+
+        if (!is_dir(dirname($filePath))) {
+            mkdir(dirname($filePath), 0777, true);
+        }
+
+        $contents = @file_get_contents($url);
+        if (!$contents) {
+            echo "Failed to download from $url\n";
+            continue;
+        }
+
+        file_put_contents($filePath, $contents);
+        echo "Downloaded $fileName to $filePath\n";
+
+        $entry = "$name@$version";
+        if (!in_array($entry, $json[$type])) {
+            $json[$type][] = $entry;
+        }
+    }
+
+    file_put_contents($jsonPath, json_encode($json, JSON_PRETTY_PRINT));
+    echo "Updated assets.json\n";
+    exit;
+}
+
+if ($command === 'uninstall:ui' && $argument) {
+    $assetDir = __DIR__ . '/resources/assets';
+    $cssDir   = $assetDir . '/css';
+    $jsDir    = $assetDir . '/js';
+    $jsonPath = $assetDir . '/assets.json';
+
+    [$name, $version] = explode('@', $argument) + [$argument, 'latest'];
+    $name = strtolower($name);
+
+    if (!file_exists($jsonPath)) {
+        echo "assets.json not found\n";
+        exit(1);
+    }
+
+    $json = json_decode(file_get_contents($jsonPath), true);
+    $changed = false;
+
+    foreach (['css', 'js'] as $type) {
+        $entry = "$name@$version";
+        if (($key = array_search($entry, $json[$type] ?? [])) !== false) {
+            unset($json[$type][$key]);
+            $json[$type] = array_values($json[$type]); // reindex
+            echo "Removed $entry from assets.json ($type)\n";
+            $changed = true;
+        }
+
+        $ext = $type === 'css' ? 'css' : 'js';
+        $filePath = ($type === 'css' ? $cssDir : $jsDir) . "/$name.min.$ext";
+        if (file_exists($filePath)) {
+            unlink($filePath);
+            echo "Deleted file: $filePath\n";
+        }
+    }
+
+    if ($changed) {
+        file_put_contents($jsonPath, json_encode($json, JSON_PRETTY_PRINT));
+        echo "Updated assets.json\n";
+    } else {
+        echo "Nothing to remove for $name@$version\n";
+    }
+
+    exit;
+}
+
+
+if ($command === 'make:layout' && $argument) {
+    $relativePath = str_replace('.', '/', $argument); // e.g. home.authlayout → home/authlayout
+    $layoutDir = __DIR__ . '/resources/views/layouts';
+    $layoutPath = $layoutDir . '/' . $relativePath . '.blade.php';
+
+    if (file_exists($layoutPath)) {
+        echo "Layout already exists: layouts/{$relativePath}.blade.php\n";
+        exit;
+    }
+
+    // Ensure directory exists
+    $dir = dirname($layoutPath);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+
+    // Your provided layout template
+    $layoutTemplate = <<<BLADE
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= e(\$title ?? config('site.default_title')) ?></title>
+    <meta name="description" content="<?= config('site.default_description', 'TemplateKit') ?>">
+
+    <!-- Auto-loaded CSS files -->
+    <?= Asset::css() ?>
+</head>
+
+<body>
+
+    <!-- Main content -->
+    <?php include \$GLOBALS['compiledView']; ?>
+
+    <!-- Optional footer -->
+    <footer class="text-center text-muted mt-5">
+        &copy; <?= date('Y') . ' ' . config('site.name', 'TemplateKit') ?>
+    </footer>
+
+    <!-- JS + Trackers -->
+    <?= Asset::js() ?>
+    <?= Tracker::load() ?>
+
+</body>
+
+</html>
+BLADE;
+
+    file_put_contents($layoutPath, $layoutTemplate);
+    echo "Layout created: resources/views/layouts/{$relativePath}.blade.php\n";
+    exit;
+}
+
+
+
+
+// Unknown command fallback
+echo "Unknown command: {$command}\n";
+echo "Use php kit help for usage.\n";
