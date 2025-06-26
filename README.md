@@ -19,7 +19,7 @@
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/yourname/templatekit.git
+git clone https://github.com/devaakash1205/templatekit.git
 cd templatekit
 composer install
 
